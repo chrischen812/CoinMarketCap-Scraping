@@ -1,0 +1,170 @@
+---
+title: "WebScraping - CoinMarketCap"
+author: "Christopher Chen"
+date: '2023-04-19'
+output: html_document
+---
+
+
+```{r }
+library(rvest)
+library(RSelenium)
+library(tidyverse)
+library(netstat)
+library(data.table)
+library(openxlsx)
+library(wdman)
+library(readr)
+```
+
+```{r }
+#selenium(retcommand=T)
+#delete the LICENSE.chromedriver file
+
+#binman::list_versions("chromedriver")
+#selServ <- wdman::selenium(verbose = FALSE)
+rs_driver_object <- rsDriver(browser = "chrome",
+         chromever = '122.0.6261.111',
+         verbose = F,
+         port = free_port()
+         )
+#remDr <- remoteDriver(remoteServerAddr = "localhost", port = 7777L, browserName = "chrome")
+remDr <- rs_driver_object$client
+
+#remDr$open()
+remDr$navigate("https://coinmarketcap.com/historical")
+
+
+General_Path <- "C:/Users/chris/Desktop/"
+
+
+
+
+```
+
+
+```{r }
+Load_More_Bt <- function() {
+remDr$findElement(using = 'xpath', "//div[@class='cmc-table-listing__loadmore']")$clickElement()
+}
+#Load_More_Bt()
+```
+
+
+```{r }
+Backpage <- function() {    remDr$navigate("https://coinmarketcap.com/historical")
+}
+```
+
+```{r }
+Date_series <- function(yr, nbr) {
+# generating range of dates
+date_df <- data.frame(Date = c(seq(as.Date(paste0(yr,"/01/01")), by = "day", length.out = 365))) %>%  mutate(DateString = format(Date, "%Y%m%d"),URL = paste0("https://coinmarketcap.com/historical/",DateString,"/")) 
+date_df$DateString[nbr]
+}
+
+URL_series <- function(yr, nbr) {
+# generating range of dates
+date_df <- data.frame(Date = c(seq(as.Date(paste0(yr,"/01/01")), by = "day", length.out = 365))) %>%  mutate(DateString = format(Date, "%Y%m%d"),URL = paste0("https://coinmarketcap.com/historical/",DateString,"/")) 
+date_df$URL[nbr]
+}
+
+
+#Date_series(2013,118)
+#URL_series(2022,365)
+```
+
+
+```{r }
+yr <- 2024
+all_data <- list()
+
+for (i in 1:110)
+{
+  tryCatch({
+URL_n <- URL_series(yr,i)
+Sys.sleep(0.5)
+Date_n <-  Date_series(yr,i)
+Sys.sleep(0.5)
+remDr$navigate(URL_n)
+Sys.sleep(0.5)  
+#Load_More_Bt()
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight/10);")
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight/10*2);")
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight/10*3);")
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight/10*4);")
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight/10*5);")
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight/10*6);")
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight/10*7);")
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight/10*8);")
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight/10*9);")
+Sys.sleep(0.5)
+remDr$executeScript("window.scrollTo(0,document.body.scrollHeight);")
+Sys.sleep(0.5)
+data_table <- remDr$findElement(using='xpath','//div[@class="cmc-table__table-wrapper-outer"]')
+data_table_html <- data_table$getPageSource()
+page <- read_html(data_table_html %>% unlist())
+df <- html_table(page)  %>% .[[3]] %>% .[,1:10] %>% 
+    mutate(Date_Input = Date_n)
+all_data <<- rbindlist(list(all_data, df))
+Sys.sleep(0.5)
+
+  }, error = function(e) {
+    # Handle the error (e.g., log it or continue without interruption)
+    cat("ERROR:", conditionMessage(e), "\n")
+  })
+  
+}
+Path <- paste0(General_Path, "/CoinMarketCap_Export_", yr, "_1",".xlsx")
+write.xlsx(all_data, Path, colNames = TRUE)
+```
+
+#Consolidate Output
+```{r }
+df_all <- list()
+yr_list <- c("2024","2023","2022","2021","2020","2019","2018","2017","2016","2015","2014","2013")
+
+
+for (yr in sort(yr_list))
+{
+temp  <- read.xlsx(paste0(General_Path,"CoinMarketCap.com_Scraping/CoinMarketCap_Export_",yr,"_1.xlsx"))
+df_all <- rbind(df_all, temp)
+}
+
+
+
+Path <- paste0(General_Path, "/CoinMarketCap_Export_Consolidated.csv")
+#write.csv(df_all, Path)
+```
+
+
+
+
+```{r }
+  
+
+```
+
+```{r }
+
+
+```
+
+```{r }
+
+
+```
+
+```{r }
+
+
+```

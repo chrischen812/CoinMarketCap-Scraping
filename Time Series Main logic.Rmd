@@ -1,0 +1,344 @@
+---
+title: "Price_Forecast"
+author: "Christopher Chen"
+date: "2024-03-22"
+output: html_document
+---
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+#Packages Used in this analysis
+```{r }
+library(broom)
+library(data.table)
+library(fable)
+library(fabletools)
+library(forecast)
+library(fpp3)
+library(ggfortify)
+#library(ggplot2)
+#library(ggetho)
+library(lubridate)
+library(openxlsx)
+library(readxl)
+library(sqldf)
+library(tidyverse)
+library(xts)
+h <- 0 # Forecast Backward number of months 
+k <- 7 # Forecast Forward number of months 
+General_Path <- "C:/Users/chris/Documents/Projects/GitHub R/Crypto Analysis"
+
+model <- "ARIMA"
+
+```
+
+#Define Functions for Connection to SQL Server
+```{r }
+query_db <- function(con, query, nrow_to_fetch = 100, nrow_to_print = 10000) {
+  start_time <- proc.time() 
+  print('Connecting to Database')
+  res <- DBI::dbSendQuery (con, query)
+  df <- NULL
+  print('Running')
+  cat("\r", 'Row 0')
+  repeat {
+    df_to_append <- DBI::dbFetch (res, n = nrow_to_fetch)
+    df <- bind_rows(df, df_to_append)
+    
+    if ((nrow(df) %% nrow_to_print) == 0) {cat("\r", paste('Row', format(nrow(df), big.mark = ",")))}
+    if (nrow(df_to_append) == 0) {
+      cat("\n\n") #this resets printing
+      break
+    }
+  }
+  dbClearResult(res)
+  code_timer(start_time)
+  return(df)
+}
+
+code_timer <- function(start_time, end_time = proc.time()) {
+  
+  time_diff <- (end_time - start_time)[1:3]
+  
+  format_seconds <- function(x) {
+    abs_x <- seconds_to_period(abs(x))
+    x <- seconds_to_period(x)
+    if (minute(abs_x) == 0) {
+      val <- paste(sprintf('%.2f', second(x)), 'seconds')
+    } else if (hour(abs_x) == 0) {
+      val <- sprintf('%01d:%05.2f', minute(x), second(abs_x))
+      return(val)
+    } else if (day(abs_x) == 0) {
+      val <- sprintf('%01d:%02d:%05.2f', hour(x), minute(abs_x), second(abs_x))
+      return(val)
+    } else {
+      return(x)
+    }
+  }
+  
+  check_db_tables <- function(db) {
+    
+    pattern <- "\\w+"
+    first_word_from <- db %>% str_extract(pattern) %>% toupper() == "FROM"
+    
+    if (!first_word_from) {
+      db <- paste('FROM', db)
+    }
+    
+    db_tables <- get_table_df(db)
+    
+    # Add a column with the table names from the database
+    pattern <- "((\\w+)\\.(\\w+))"
+    db_tables <- db_tables %>%
+      select(table_string, table_name, alias, join_tables) %>%
+      rename(db_table = table_name)
+    
+    return(db_tables)
+    
+  }
+  
+  
+  time_diff_formatted <- sapply(time_diff, format_seconds)
+  
+  writeLines(
+    c(paste('real time:         ', getElement(time_diff_formatted, "elapsed")),
+      paste('user cpu time:     ', getElement(time_diff_formatted, "user.self")),
+      paste('system cpu time:   ', getElement(time_diff_formatted, "sys.self"))
+    )
+  )
+  
+  invisible(time_diff)
+  
+}
+
+connect_to_db <- function(dsn = "Teradata") {
+  start_time <- proc.time()
+  con <- dbConnect(odbc::odbc(),
+                   dsn,
+                   #UID = rstudioapi::askForPassword("MS ID"),
+                   #PWD = rstudioapi::askForPassword("MS Password"),
+                   timeout = 90)
+  code_timer(start_time)
+  return(con)
+}
+
+PredDateRange <- function(series,n){
+
+v_dates_end <- seq(as.Date(end(series)),
+                   by = unclass(periodicity(series))$label,
+                   length.out = (n+1))[-1]
+x_expand_time_index <- xts(, order.by = c(as.Date(start(series)), v_dates_end))
+x <- merge(series, x_expand_time_index, fill = NA)
+return(index(x))
+}
+```
+
+#Extraction from dbML SQL SERVER
+```{r, EVAL = F }
+con <- connect_to_db(dsn="dbML")
+
+query_1 <- paste("SELECT  * 
+FROM [dbML].[dbo].[CoinMarketCap_Daily]
+WHERE Symbol IN (SELECT DISTINCT Symbol FROM [dbML].[dbo].[CoinMarketCap_Daily] WHERE Date_Input LIKE '2024%')")
+
+
+Raw_Dataset <- query_db(con, query_1)
+
+```
+
+#Seasonality Detection using Fourier Transforms
+```{r }
+library(TSA)
+
+#Function to return top n highest "power" frequencies
+TopNFrequencies <- function(TimeSeries, n) {
+  p <- periodogram(TimeSeries, plot = F)
+  invisible(p)
+  dd <- data.frame(freq = p$freq, spec = p$spec)
+  order <- dd[order(-dd$spec),]
+  top <- head(order, n)
+  topn <- 1/top$f
+  return(topn)  # Suppress any implicit plots
+}
+
+PeriodogramPlot <- function(TimeSeries, StrPlot_N) {
+  # Compute the periodogram
+  sp = spec(TimeSeries, log = "No", plot = FALSE)
+  sp$spec = 2 * sp$spec
+  temp = sp$spec[sp$freq == 0.5]
+  sp$spec[sp$freq == 0.5] = temp/2
+  
+  dt <- data.table(spec = sp$spec, freq = sp$freq)
+  
+ ggplot(dt, aes(x = freq, y = spec)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Frequency", y = "Spectrum", title=StrPlot_N) +
+  theme_minimal()
+}
+
+#PeriodogramPlot(train,"test")
+
+```
+
+#
+```{r }
+Raw_Dataset$Date <-  as.Date(as.character(Raw_Dataset$Date_Input), format='%Y%m%d')
+
+Raw_Dataset <- Raw_Dataset %>%
+  filter(Date >= '2023-01-01')
+```
+
+#
+```{r }
+predList <- list()
+plotList <- list()
+plot2List <- list()
+#plot3List <- list()
+
+
+for (val_symbol in unique(Raw_Dataset$Symbol))
+{ 
+
+ tryCatch({
+
+#Create lists to hold series/fitted values/predictions & plot objects
+predName <- paste('pred', val_symbol,  sep = '_')
+plotName <- paste('plot', val_symbol,  sep = '_')
+lmName <- paste('lm', val_symbol,  sep = '_')
+
+series <- as.xts(Raw_Dataset[which(Raw_Dataset$Symbol == val_symbol), c("Date","Price")])
+
+MC_series <- as.xts(Raw_Dataset[which(Raw_Dataset$Symbol == val_symbol), c("Date","Market_Cap")])
+
+#Train set - without most recent h periods
+train <-  first(series, paste(length(series), "days"))
+#test  <-  last(series, paste( k, "days"))
+fit   <-  train %>% auto.arima(seasonal=FALSE, stepwise = FALSE, approximation = FALSE)
+
+#coredata(train)[is.na(train$R12_CAT_PCT) | is.nan(train$R12_CAT_PCT)] <- 0
+
+#P-value < 0.05 Reject Null and therefore residual indicates dependency, otherwise (>0.05) residual ~ normally distributed
+LjungBox_P <- tidy(checkresiduals(fit, plot = FALSE))$p.value 
+p_Whitenoise <- LjungBox_P > 0.05
+
+#Extract Model Order for plot title
+fc_model <- fit %>% forecast(h = k)
+ModelType_str <-  fc_model$method
+title_str <- paste0(val_symbol,
+              ' - ',ModelType_str,' - White Noise(',
+              substr(p_Whitenoise,1,1),')')
+
+#Summarize the model
+ModelPlot <- fortify(fc_model) %>%
+    mutate(Date = as.Date(PredDateRange(series,k)),
+    `Point Forecast` = ifelse(is.na(`Point Forecast`) & Date == index(series[length(series) - h]), Fitted,`Point Forecast`),
+    `Lo 80` = ifelse(is.na(`Lo 80`) & Date == index(series[length(series) - h]), Fitted, `Lo 80` ),
+    `Hi 80` = ifelse(is.na(`Hi 80`) & Date == index(series[length(series) - h]), Fitted, `Hi 80` ),
+    `Lo 95` = ifelse(is.na(`Lo 95`) & Date == index(series[length(series) - h]), Fitted, `Lo 95` ),
+    `Hi 95` = ifelse(is.na(`Hi 95`) & Date == index(series[length(series) - h]), Fitted, `Hi 95` ),
+    Symbol = val_symbol) %>%
+   #Safeguard for negative prediction/confidence interval
+    mutate(`Point Forecast`= ifelse(`Point Forecast` < 0, 0, `Point Forecast`), `Lo 80` = ifelse(`Lo 80`< 0, 0, `Lo 80`),
+           `Hi 80` = ifelse(`Hi 80`< 0, 0, `Hi 80`),
+           `Lo 95` = ifelse(`Lo 95`< 0, 0, `Lo 95`),
+           `Hi 95` = ifelse(`Hi 95`< 0, 0, `Hi 95`),
+           `Fitted` = ifelse(`Fitted`< 0, 0, `Fitted`)) %>% 
+   #Annotation on plot series
+    mutate(PF_Annot = ifelse(Index %% 5 == 0, paste(round(100*`Point Forecast`, 1), "%", sep=""),""),
+           AS_Annot = ifelse((Index - 1) %% 3 == 0, paste(round(100*Data, 1), "%", sep=""),""))
+
+
+predList[[ predName ]] <- ModelPlot %>%
+   #Series Modeling centric Information
+    mutate(Model = fc_model$method,
+           Train_RMSE = RMSE(fit$residuals),
+           LjungBox_PValue = LjungBox_P,
+           Top1Frequencies = TopNFrequencies(train,3)[1],
+           Top2Frequencies = TopNFrequencies(train,3)[2],
+           Top3Frequencies = TopNFrequencies(train,3)[3])
+
+
+#Plot forecasts of fit 
+plotList[[ plotName ]] <- ggplot(ModelPlot, aes(x=Date, y=Data)) +
+  geom_line(colour = 'dodgerblue3') +
+  geom_line(aes(x=Date, y=Fitted),colour = 'red') +
+  geom_point(aes(x=Date, y=Fitted),colour = 'red') +
+  geom_line(aes(x=Date, y=`Point Forecast`),colour = 'red',linetype = 'dashed') +
+  geom_point(aes(x=Date, y=Data),colour = 'dodgerblue3') +
+  geom_ribbon(aes(ymin=`Lo 95`, ymax=`Hi 95`), linetype=2, alpha=0.2) +
+  geom_ribbon(aes(ymin=`Lo 80`, ymax=`Hi 80`), linetype=2, alpha=0.3) +
+  theme(plot.title = element_text(size=20,face = 'bold'),
+        axis.text=element_text(size=10,face = 'bold'), 
+        axis.title=element_text(size=10,face = 'bold'),
+        axis.text.x = element_text(angle = 25)) +
+  labs(y= "Price",
+       x= "Time (Daily)",
+       title = title_str)
+  scale_x_date(date_breaks = "1 day",date_labels = "%Y-%m")
+  
+plot2List[[ plotName ]] <- PeriodogramPlot(train,title_str)
+  
+  
+  }, error = function(e) {
+    # Handle the error (e.g., log it or continue without interruption)
+    cat("ERROR:", conditionMessage(e), "\n")
+  })
+  
+}
+
+
+```
+
+#
+```{r }
+ConPredList <- bind_rows(predList, .id = "column_label") %>%
+               mutate(column_label = substr(column_label,6,length(column_label)))
+
+#Predicted Values
+write.xlsx(ConPredList, paste0(General_Path, "/Crypto_PredictedValues_",model,".xlsx"), colNames = TRUE)
+
+
+#Plots
+pdf(paste0(General_Path, "/Crypto_Plots_",model,".pdf"), width = 15, height = 7)
+plotList
+dev.off()
+
+pdf(paste0(General_Path, "/Crypto_PeriodogramPlots_",model,".pdf"), width = 15, height = 7)
+plot2List
+dev.off()
+
+```
+
+
+
+```{r }
+# Compute periodogram for each individual
+p<- periodogram(train, plot = T)
+plot( periodogram(train, plot = F))
+plot(train)
+
+y <- train
+  sp = spec(y, log = log, plot = FALSE)
+  sp$spec = 2 * sp$spec
+  temp = sp$spec[sp$freq == 0.5]
+  sp$spec[sp$freq == 0.5] = temp/2
+
+per_dt <- periodogram(train)
+dt <- data.table(spec = per_dt$spec, freq = per_dt$freq)
+
+# Create ggplot representation
+ ggplot(dt, aes(x = spec, y = freq)) +   
+    geom_line()
+
+```
+
+
+
+
+
+
+
+
+
