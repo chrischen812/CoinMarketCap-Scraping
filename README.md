@@ -1,5 +1,6 @@
 # Crypto Analysis - Current scope
 1.Data Scraping of Daily snapshots of top 200 ranking crypto symbols from 2013/05 thru 2023/03 from CoinMarketCap.com
+
 1.Price Prediction via Time Series approach
 
 I hope this message finds you well. I have dedicated significant effort to understanding macro crypto movements and am excited to share my analysis with you.
