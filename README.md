@@ -2,7 +2,7 @@
 
 ## Current scope
 * Scraping of Daily snapshots of top 200 ranking crypto symbols from 2013/05 thru 2023/03 from CoinMarketCap.com
-* Price Prediction via Time Series methods
+* Price Forecast via Time Series methods
 
 
 ## Networking
