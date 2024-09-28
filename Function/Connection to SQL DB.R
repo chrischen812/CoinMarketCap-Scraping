@@ -92,16 +92,6 @@ connect_to_db <- function(dsn = "Teradata") {
 }
 
 
-library(sqldf)
-library(tidyverse)
-library(lubridate)
-
-Level2 <- connect_to_db(dsn="LEV_PROD")
-query <- paste(
-"SELECT TOP 1000 *",
-"FROM [dbo].[Members_202306_20230718]")
-
-df2 <- query_db(Level2, query)
 
 
 
