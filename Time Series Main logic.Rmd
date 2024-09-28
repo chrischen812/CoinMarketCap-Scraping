@@ -34,6 +34,7 @@ model <- "ARIMA"
 
 ```
 
+
 #Define Functions for Connection to SQL Server
 ```{r }
 query_db <- function(con, query, nrow_to_fetch = 100, nrow_to_print = 10000) {
