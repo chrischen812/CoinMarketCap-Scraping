@@ -17,6 +17,7 @@ library(wdman)
 library(readr)
 ```
 
+
 ```{r }
 #selenium(retcommand=T)
 #delete the LICENSE.chromedriver file
