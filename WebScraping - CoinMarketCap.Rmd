@@ -38,9 +38,6 @@ remDr$navigate("https://coinmarketcap.com/historical")
 
 General_Path <- "C:/Users/chris/Desktop/"
 
-
-
-
 ```
 
 
@@ -53,7 +50,7 @@ remDr$findElement(using = 'xpath', "//div[@class='cmc-table-listing__loadmore']"
 
 
 ```{r }
-Backpage <- function() {    remDr$navigate("https://coinmarketcap.com/historical")
+Backpage <- function() {remDr$navigate("https://coinmarketcap.com/historical")
 }
 ```
 
@@ -80,7 +77,8 @@ date_df$URL[nbr]
 yr <- 2024
 all_data <- list()
 
-for (i in 1:110)
+
+for (i in 1:36)
 {
   tryCatch({
 URL_n <- URL_series(yr,i)
