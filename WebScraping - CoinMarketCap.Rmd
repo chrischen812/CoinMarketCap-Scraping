@@ -123,7 +123,7 @@ Sys.sleep(0.5)
   })
   
 }
-Path <- paste0(General_Path, "/CoinMarketCap_Export_", yr, "_1",".xlsx")
+Path <- paste0(General_Path, "/CoinMarketCap_Export_", yr,".xlsx")
 write.xlsx(all_data, Path, colNames = TRUE)
 ```
 
